@@ -17,7 +17,7 @@ PROJECT_RULES_READ: yes
 Copy `.env.example` to `.env` for local development and set a real OpenRouter key only in `.env`.
 
 ```dotenv
-OPENROUTER_API_KEY=changeme
+OPENROUTER_API_KEY=
 OPENROUTER_MODEL=nvidia/nemotron-3-super-120b-a12b:free
 OPENROUTER_HTTP_REFERER=http://localhost:3000
 OPENROUTER_TITLE=gpt-copy-v6
@@ -90,7 +90,7 @@ Push-Location frontend
 npm run dev
 ```
 
-The frontend reads `NEXT_PUBLIC_API_BASE_URL`. The backend reads `OPENROUTER_API_KEY`, `OPENROUTER_MODEL`, `DATABASE_URL`, and `BACKEND_BIND_ADDR`.
+The frontend defaults to `http://localhost:8080` when `NEXT_PUBLIC_API_BASE_URL` is not set. Set it in `frontend/.env.local` only when the backend uses a different origin. The backend reads `OPENROUTER_API_KEY`, `OPENROUTER_MODEL`, `DATABASE_URL`, and `BACKEND_BIND_ADDR`.
 
 ## API
 

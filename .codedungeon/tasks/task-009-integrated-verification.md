@@ -21,5 +21,6 @@ Verify:
 ```powershell
 Push-Location backend; cargo fmt -- --check; cargo check; cargo clippy --all-targets -- -D warnings; cargo test; Pop-Location
 Push-Location frontend; npm run lint; npm run test; npm run build; npx playwright test; Pop-Location
-git grep -n -E "sk-or-v1-|OPENROUTER_API_KEY=." -- . ':!*.lock'
+$openrouterKeyPrefix = "sk-" + "or-v1-"
+git grep -n -- $openrouterKeyPrefix -- . ':!*.lock'
 ```

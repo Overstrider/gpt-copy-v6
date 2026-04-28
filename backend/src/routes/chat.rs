@@ -15,6 +15,7 @@ use crate::state::AppState;
 use super::conversations::{ensure_conversation, parse_conversation_id};
 
 const MAX_MESSAGE_LEN: usize = 16_000;
+const MAX_ASSISTANT_LEN: usize = 64_000;
 
 pub async fn send_message(
     Path(id): Path<String>,
@@ -100,6 +101,23 @@ pub async fn stream_message(
             match chunk {
                 Ok(chunk) => {
                     assistant_content.push_str(&chunk);
+                    if assistant_content.chars().count() > MAX_ASSISTANT_LEN {
+                        let app_error = AppError::from(crate::provider::ProviderError::InvalidResponse(
+                            format!("assistant content exceeded {MAX_ASSISTANT_LEN} characters"),
+                        ));
+                        if let Err(db_error) =
+                            db::update_message_status(&pool, &assistant_message.id, &assistant_content, "failed").await
+                        {
+                            tracing::error!(error = ?db_error, "failed to mark oversized stream assistant failed");
+                        }
+                        if let Err(db_error) =
+                            db::mark_chat_request_failed(&pool, &request_id, app_error.code()).await
+                        {
+                            tracing::error!(error = ?db_error, "failed to mark oversized stream request failed");
+                        }
+                        yield Ok(error_event(&app_error));
+                        return;
+                    }
                     yield Ok(json_event("delta", serde_json::json!({ "content": chunk })));
                 }
                 Err(error) => {
@@ -195,7 +213,7 @@ async fn provider_request_for_conversation(
     state: &AppState,
     conversation_id: &str,
 ) -> Result<ChatProviderRequest, AppError> {
-    let messages = db::list_messages(&state.pool, conversation_id)
+    let messages = db::list_messages_for_provider(&state.pool, conversation_id)
         .await?
         .into_iter()
         .map(|message| ProviderMessage {
@@ -214,6 +232,13 @@ fn validate_provider_response(response: ChatProviderResponse) -> Result<String, 
     if response.content.trim().is_empty() {
         return Err(AppError::from(
             crate::provider::ProviderError::InvalidResponse("empty assistant content".to_owned()),
+        ));
+    }
+    if response.content.chars().count() > MAX_ASSISTANT_LEN {
+        return Err(AppError::from(
+            crate::provider::ProviderError::InvalidResponse(format!(
+                "assistant content exceeded {MAX_ASSISTANT_LEN} characters"
+            )),
         ));
     }
 

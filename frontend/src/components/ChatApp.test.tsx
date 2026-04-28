@@ -100,4 +100,118 @@ describe("ChatApp", () => {
 
     expect(await screen.findByText("Backend unavailable")).toBeInTheDocument();
   });
+
+  it("creates a conversation before sending the first message from an empty state", async () => {
+    const createdConversation = {
+      ...conversation,
+      id: "conversation-2",
+      title: "First message"
+    };
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+
+      if (url === "http://localhost:8080/conversations" && method === "GET") {
+        return new Response(JSON.stringify({ conversations: [] }), {
+          headers: { "content-type": "application/json" }
+        });
+      }
+
+      if (url === "http://localhost:8080/conversations" && method === "POST") {
+        return new Response(JSON.stringify({ conversation: createdConversation }), {
+          status: 201,
+          headers: { "content-type": "application/json" }
+        });
+      }
+
+      if (url === "http://localhost:8080/conversations/conversation-2/messages" && method === "GET") {
+        return new Response(JSON.stringify({ messages: [] }), {
+          headers: { "content-type": "application/json" }
+        });
+      }
+
+      if (
+        url === "http://localhost:8080/conversations/conversation-2/messages/stream" &&
+        method === "POST"
+      ) {
+        return streamResponse([
+          'event: message_start\ndata: {"message":{"id":"assistant-2","conversation_id":"conversation-2","role":"assistant","content":"","status":"streaming","created_at":"2026-04-28T12:00:01Z"}}\n\n',
+          'event: delta\ndata: {"content":"Created"}\n\n',
+          'event: message_complete\ndata: {"message":{"id":"assistant-2","conversation_id":"conversation-2","role":"assistant","content":"Created","status":"completed","created_at":"2026-04-28T12:00:01Z","completed_at":"2026-04-28T12:00:02Z"}}\n\n'
+        ]);
+      }
+
+      throw new Error(`Unexpected request: ${method} ${url}`);
+    });
+
+    render(<ChatApp />);
+
+    expect(await screen.findByText("No conversations yet.")).toBeInTheDocument();
+
+    await userEvent.type(screen.getByRole("textbox", { name: /message/i }), "First message");
+    await userEvent.click(screen.getByRole("button", { name: /send message/i }));
+
+    expect((await screen.findAllByText("First message")).length).toBeGreaterThan(0);
+    expect(await screen.findByText("Created")).toBeInTheDocument();
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "http://localhost:8080/conversations",
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({ title: "First message" })
+        })
+      );
+      expect(fetchMock).toHaveBeenCalledWith(
+        "http://localhost:8080/conversations/conversation-2/messages/stream",
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({ content: "First message" })
+        })
+      );
+    });
+  });
+
+  it("shows streaming errors and re-enables sending", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+
+      if (url === "http://localhost:8080/conversations" && method === "GET") {
+        return new Response(JSON.stringify({ conversations: [conversation] }), {
+          headers: { "content-type": "application/json" }
+        });
+      }
+
+      if (url === "http://localhost:8080/conversations/conversation-1/messages" && method === "GET") {
+        return new Response(JSON.stringify({ messages: [] }), {
+          headers: { "content-type": "application/json" }
+        });
+      }
+
+      if (
+        url === "http://localhost:8080/conversations/conversation-1/messages/stream" &&
+        method === "POST"
+      ) {
+        return streamResponse([
+          'event: error\ndata: {"error":{"code":"provider_rate_limited","message":"Rate limited"}}\n\n'
+        ]);
+      }
+
+      throw new Error(`Unexpected request: ${method} ${url}`);
+    });
+
+    render(<ChatApp />);
+
+    expect(await screen.findByRole("button", { name: /api design/i })).toBeInTheDocument();
+
+    await userEvent.type(screen.getByRole("textbox", { name: /message/i }), "Try stream");
+    await userEvent.click(screen.getByRole("button", { name: /send message/i }));
+
+    expect(await screen.findByText("Rate limited")).toBeInTheDocument();
+
+    await waitFor(() => {
+      expect(screen.getByRole("textbox", { name: /message/i })).not.toBeDisabled();
+    });
+  });
 });

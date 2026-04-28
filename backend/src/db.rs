@@ -86,6 +86,22 @@ pub async fn list_messages(
     .await
 }
 
+pub async fn list_messages_for_provider(
+    pool: &SqlitePool,
+    conversation_id: &str,
+) -> Result<Vec<Message>, sqlx::Error> {
+    sqlx::query_as::<_, Message>(
+        "SELECT id, conversation_id, role, content, status, created_at, completed_at
+         FROM messages
+         WHERE conversation_id = ?
+           AND status = 'completed'
+         ORDER BY ordinal ASC",
+    )
+    .bind(conversation_id)
+    .fetch_all(pool)
+    .await
+}
+
 pub async fn insert_message(
     pool: &SqlitePool,
     conversation_id: &str,

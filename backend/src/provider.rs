@@ -1,4 +1,5 @@
 use std::pin::Pin;
+use std::time::Duration;
 
 use async_stream::try_stream;
 use async_trait::async_trait;
@@ -9,6 +10,8 @@ use serde_json::Value;
 use thiserror::Error;
 
 pub type ProviderStream = Pin<Box<dyn Stream<Item = Result<String, ProviderError>> + Send>>;
+const OPENROUTER_CHAT_COMPLETIONS_URL: &str = "https://openrouter.ai/api/v1/chat/completions";
+const OPENROUTER_MAX_TOKENS: u32 = 2048;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ProviderMessage {
@@ -68,16 +71,27 @@ pub struct OpenRouterProvider {
     api_key: Option<String>,
     http_referer: Option<String>,
     title: String,
+    chat_completions_url: String,
 }
 
 impl OpenRouterProvider {
     pub fn new(api_key: Option<String>, http_referer: Option<String>, title: String) -> Self {
         Self {
-            client: reqwest::Client::new(),
+            client: reqwest::Client::builder()
+                .connect_timeout(Duration::from_secs(10))
+                .timeout(Duration::from_secs(60))
+                .build()
+                .expect("failed to build OpenRouter HTTP client"),
             api_key,
             http_referer,
             title,
+            chat_completions_url: OPENROUTER_CHAT_COMPLETIONS_URL.to_owned(),
         }
+    }
+
+    pub fn with_chat_completions_url(mut self, url: impl Into<String>) -> Self {
+        self.chat_completions_url = url.into();
+        self
     }
 
     fn request_builder(&self, url: &str) -> Result<reqwest::RequestBuilder, ProviderError> {
@@ -111,9 +125,10 @@ impl ChatProvider for OpenRouterProvider {
             model: request.model,
             messages: request.messages,
             stream: false,
+            max_tokens: OPENROUTER_MAX_TOKENS,
         };
         let response = self
-            .request_builder("https://openrouter.ai/api/v1/chat/completions")?
+            .request_builder(&self.chat_completions_url)?
             .json(&body)
             .send()
             .await
@@ -151,9 +166,10 @@ impl ChatProvider for OpenRouterProvider {
             model: request.model,
             messages: request.messages,
             stream: true,
+            max_tokens: OPENROUTER_MAX_TOKENS,
         };
         let response = self
-            .request_builder("https://openrouter.ai/api/v1/chat/completions")?
+            .request_builder(&self.chat_completions_url)?
             .json(&body)
             .send()
             .await
@@ -286,6 +302,7 @@ struct OpenRouterRequest {
     model: String,
     messages: Vec<ProviderMessage>,
     stream: bool,
+    max_tokens: u32,
 }
 
 #[derive(Debug, Deserialize)]

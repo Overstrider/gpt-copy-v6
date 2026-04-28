@@ -54,9 +54,16 @@ export function useChatStream() {
   const [isStreaming, setIsStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const selectedConversationIdRef = useRef<string | null>(null);
+  const streamConversationIdRef = useRef<string | null>(null);
+  const skipNextLoadConversationIdRef = useRef<string | null>(null);
 
   const selectedConversation =
     conversations.find((conversation) => conversation.id === selectedConversationId) ?? null;
+
+  useEffect(() => {
+    selectedConversationIdRef.current = selectedConversationId;
+  }, [selectedConversationId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -96,6 +103,15 @@ export function useChatStream() {
       return;
     }
 
+    if (streamConversationIdRef.current === selectedConversationId) {
+      return;
+    }
+
+    if (skipNextLoadConversationIdRef.current === selectedConversationId) {
+      skipNextLoadConversationIdRef.current = null;
+      return;
+    }
+
     let cancelled = false;
     const conversationId = selectedConversationId;
 
@@ -106,7 +122,9 @@ export function useChatStream() {
       try {
         const loaded = await listMessages(conversationId);
         if (!cancelled) {
-          setMessages(loaded);
+          if (selectedConversationIdRef.current === conversationId) {
+            setMessages(loaded);
+          }
         }
       } catch (loadError) {
         if (!cancelled) {
@@ -132,17 +150,28 @@ export function useChatStream() {
     };
   }, []);
 
+  const abortActiveStream = useCallback(() => {
+    abortRef.current?.abort();
+    abortRef.current = null;
+    streamConversationIdRef.current = null;
+    setIsStreaming(false);
+  }, []);
+
   const startConversation = useCallback(async () => {
+    abortActiveStream();
     setError(null);
     const conversation = await createConversation("New chat");
     setConversations((current) => [conversation, ...current.filter((item) => item.id !== conversation.id)]);
+    selectedConversationIdRef.current = conversation.id;
     setSelectedConversationId(conversation.id);
     setMessages([]);
-  }, []);
+  }, [abortActiveStream]);
 
   const selectConversation = useCallback((conversationId: string) => {
+    abortActiveStream();
+    selectedConversationIdRef.current = conversationId;
     setSelectedConversationId(conversationId);
-  }, []);
+  }, [abortActiveStream]);
 
   const send = useCallback(
     async (content: string) => {
@@ -164,9 +193,12 @@ export function useChatStream() {
         if (!conversation) {
           conversation = await createConversation(titleFromMessage(trimmed));
           setConversations((current) => [conversation!, ...current]);
+          selectedConversationIdRef.current = conversation.id;
+          skipNextLoadConversationIdRef.current = conversation.id;
           setSelectedConversationId(conversation.id);
         }
 
+        streamConversationIdRef.current = conversation.id;
         const userMessage = localMessage(conversation.id, "user", trimmed);
         setMessages((current) => [...current, userMessage]);
 
@@ -177,10 +209,16 @@ export function useChatStream() {
           trimmed,
           {
             onMessageStart(message) {
+              if (selectedConversationIdRef.current !== conversation!.id) {
+                return;
+              }
               assistantMessageId = message.id;
               setMessages((current) => [...current, message]);
             },
             onDelta(delta) {
+              if (selectedConversationIdRef.current !== conversation!.id) {
+                return;
+              }
               setMessages((current) => {
                 if (!assistantMessageId) {
                   const placeholder = localMessage(conversation!.id, "assistant", delta);
@@ -196,6 +234,9 @@ export function useChatStream() {
               });
             },
             onMessageComplete(message) {
+              if (selectedConversationIdRef.current !== conversation!.id) {
+                return;
+              }
               assistantMessageId = message.id;
               setMessages((current) => {
                 const hasMessage = current.some((item) => item.id === message.id);
@@ -207,7 +248,9 @@ export function useChatStream() {
               });
             },
             onError(streamError) {
-              setError(streamError.message);
+              if (selectedConversationIdRef.current === conversation!.id) {
+                setError(streamError.message);
+              }
             }
           },
           controller.signal
@@ -219,6 +262,9 @@ export function useChatStream() {
       } finally {
         if (abortRef.current === controller) {
           abortRef.current = null;
+        }
+        if (streamConversationIdRef.current === conversation?.id) {
+          streamConversationIdRef.current = null;
         }
         setIsStreaming(false);
       }

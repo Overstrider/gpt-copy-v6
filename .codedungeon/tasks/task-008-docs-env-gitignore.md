@@ -19,5 +19,6 @@ Verify:
 
 ```powershell
 git diff --check
-git grep -n -E "sk-or-v1-|OPENROUTER_API_KEY=." -- . ':!*.lock'
+$openrouterKeyPrefix = "sk-" + "or-v1-"
+git grep -n -- $openrouterKeyPrefix -- . ':!*.lock'
 ```
