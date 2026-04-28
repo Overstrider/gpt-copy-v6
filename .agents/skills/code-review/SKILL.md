@@ -1,0 +1,43 @@
+---
+name: code-review
+description: Run a standalone codedungeon-style adversarial review in Codex CLI.
+---
+
+## Project Rules Gate
+
+Before planning, executing, reviewing, or reporting completion, run `codedungeon rules status` and read `.codedungeon/project-rules.compact.md` when present. If rules are missing, warn the user and recommend `/codedungeon --rules` or `$codedungeon --rules`; do not silently invent project rules. If status is `draft` or `stale`, block `--full` and `--lite` unless the user explicitly says to proceed with stale rules; `--oneshot` may continue with a warning for small direct fixes.
+
+Every plan, task file, review report, phase handoff, and final report must include this Project Rules envelope:
+
+```text
+PROJECT_RULES_STATUS: approved|missing|draft|stale
+PROJECT_RULES_DIGEST: <rules_digest from codedungeon rules status or none>
+PROJECT_RULES_READ: yes|no
+```
+
+# code-review
+
+Use for reviewing the current branch or an implementation diff.
+
+Deterministic evidence:
+- Do not write review reports manually.
+- Write `review-manifest.json` with personas, base/head SHA, PR number, and timestamp.
+- Ensure each persona writes its own JSON output, including `findings-saboteur.json`, before aggregation.
+- Persona JSON with no findings must include `reviewed_files > 0` and `no_findings_rationale`.
+- Run `./.codex/bin/codedungeon review run` to generate `review.md` and `review.json`.
+- Before each persona, validator, classifier, or stack-specialist subagent, run `./.codex/bin/codedungeon trace agent-start`; after it returns, run `./.codex/bin/codedungeon trace agent-end` with the returned `agent_run_id`.
+
+Review power:
+- Cycles 1-3: full adversarial mode.
+- Cycles 4-9: reduced mode. Keep personas, use fast model/effort, and focus on fixes/new diff.
+
+Review order:
+- Correctness regressions.
+- Security and data handling.
+- Missing verification: treat absent build/check/test evidence as BLOCKING.
+- Missing or weak tests.
+- Maintainability only when it creates concrete risk.
+
+If a workflow claims completion without concrete build/check/test evidence, report `missing verification` as BLOCKING. The report must name the absent command class. For Rust changes, expect `cargo check` and `cargo test`. For changed `Dockerfile` or `Containerfile`, expect `podman build` or a documented environment blocker. `APPROVED does not replace verification`.
+
+Output findings first, ordered by severity. Include file and line references. If there are no actionable findings, say so directly.

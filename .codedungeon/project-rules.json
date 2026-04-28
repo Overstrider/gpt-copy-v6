@@ -1,0 +1,14 @@
+{
+  "status": "approved",
+  "rules_path": ".codedungeon/project-rules.md",
+  "compact_path": ".codedungeon/project-rules.compact.md",
+  "source_digest": "fbb211ecf6185ecdc5cd98fe0b9b72056d30b79feda7ddab165dc127b102740c",
+  "rules_digest": "be792d27d9969ae5ed95a5caa5de79b0b97d20bbd97ec73bf92cd031941e9d31",
+  "approved_at": "2026-04-28T21:35:48Z",
+  "approved_by": "setup-example",
+  "sources": [
+    ".env.example",
+    "AGENTS.md",
+    "README.md"
+  ]
+}
