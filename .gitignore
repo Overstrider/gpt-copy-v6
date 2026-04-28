@@ -2,7 +2,12 @@
 .env.*
 !.env.example
 
+*.db
+*.sqlite
+*.sqlite3
+
 backend/target/
+backend/.sqlx/
 backend/*.db
 backend/*.sqlite
 backend/*.sqlite3
