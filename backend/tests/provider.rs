@@ -1,10 +1,14 @@
 mod common;
 
 use axum::Json;
+use axum::body::{Body, Bytes};
 use axum::extract::State;
 use axum::http::{HeaderMap, Method, StatusCode};
+use axum::response::Response;
 use axum::routing::post;
+use futures_util::{StreamExt, stream};
 use serde_json::json;
+use std::convert::Infallible;
 use std::sync::{Arc, Mutex};
 
 use backend::provider::{
@@ -77,6 +81,33 @@ async fn provider_invalid_response_maps_to_bad_gateway() {
 
     assert_eq!(status, StatusCode::BAD_GATEWAY);
     assert_eq!(body["error"]["code"], "provider_invalid_response");
+}
+
+#[tokio::test]
+async fn oversized_completion_is_rejected_and_request_marked_failed() {
+    let context = common::test_context().await;
+    context
+        .provider
+        .with_completion_text(Ok("x".repeat(64_001)));
+    let conversation_id = common::create_conversation(context.app.clone()).await;
+
+    let (status, body) = common::request_json(
+        context.app,
+        Method::POST,
+        &format!("/conversations/{conversation_id}/messages"),
+        Some(json!({ "content": "Hello" })),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::BAD_GATEWAY);
+    assert_eq!(body["error"]["code"], "provider_invalid_response");
+
+    let failed_requests: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM chat_requests WHERE status = 'failed'")
+            .fetch_one(&context.pool)
+            .await
+            .unwrap();
+    assert_eq!(failed_requests, 1);
 }
 
 #[test]
@@ -176,6 +207,131 @@ async fn openrouter_provider_sends_expected_headers_and_body_to_chat_api() {
     assert_eq!(captured.body.as_ref().unwrap()["model"], "test-model");
     assert_eq!(captured.body.as_ref().unwrap()["stream"], false);
     assert_eq!(captured.body.as_ref().unwrap()["max_tokens"], 2048);
+
+    server.abort();
+}
+
+#[tokio::test]
+async fn openrouter_provider_stream_preserves_utf8_split_across_http_chunks() {
+    #[derive(Default)]
+    struct Capture {
+        body: Option<serde_json::Value>,
+    }
+
+    async fn handler(
+        State(capture): State<Arc<Mutex<Capture>>>,
+        Json(body): Json<serde_json::Value>,
+    ) -> Response {
+        capture.lock().unwrap().body = Some(body);
+        let payload = r#"data: {"choices":[{"delta":{"content":"olá"}}]}
+
+data: [DONE]
+
+"#;
+        let bytes = payload.as_bytes();
+        let split = bytes
+            .iter()
+            .position(|byte| *byte == 0xc3)
+            .expect("test payload should contain a multi-byte character")
+            + 1;
+        let chunks = vec![
+            Ok::<Bytes, Infallible>(Bytes::copy_from_slice(&bytes[..split])),
+            Ok::<Bytes, Infallible>(Bytes::copy_from_slice(&bytes[split..])),
+        ];
+
+        Response::builder()
+            .header("content-type", "text/event-stream")
+            .body(Body::from_stream(stream::iter(chunks)))
+            .unwrap()
+    }
+
+    let capture = Arc::new(Mutex::new(Capture::default()));
+    let app = axum::Router::new()
+        .route("/chat/completions", post(handler))
+        .with_state(capture.clone());
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+
+    let provider = OpenRouterProvider::new(
+        Some("test-api-key".to_owned()),
+        None,
+        "gpt-copy-v6".to_owned(),
+    )
+    .with_chat_completions_url(format!("http://{addr}/chat/completions"));
+    let mut stream = provider
+        .stream(ChatProviderRequest {
+            model: "test-model".to_owned(),
+            messages: vec![ProviderMessage {
+                role: "user".to_owned(),
+                content: "hello".to_owned(),
+            }],
+        })
+        .await
+        .unwrap();
+    let mut chunks = Vec::new();
+
+    while let Some(chunk) = stream.next().await {
+        chunks.push(chunk.unwrap());
+    }
+
+    assert_eq!(chunks, vec!["olá"]);
+    let captured = capture.lock().unwrap();
+    assert_eq!(captured.body.as_ref().unwrap()["model"], "test-model");
+    assert_eq!(
+        captured.body.as_ref().unwrap()["messages"][0]["role"],
+        "user"
+    );
+    assert_eq!(
+        captured.body.as_ref().unwrap()["messages"][0]["content"],
+        "hello"
+    );
+    assert_eq!(captured.body.as_ref().unwrap()["stream"], true);
+    assert_eq!(captured.body.as_ref().unwrap()["max_tokens"], 2048);
+
+    server.abort();
+}
+
+#[tokio::test]
+async fn openrouter_provider_stream_maps_upstream_rate_limits() {
+    async fn handler() -> Response {
+        Response::builder()
+            .status(StatusCode::TOO_MANY_REQUESTS)
+            .body(Body::empty())
+            .unwrap()
+    }
+
+    let app = axum::Router::new().route("/chat/completions", post(handler));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+
+    let provider = OpenRouterProvider::new(
+        Some("test-api-key".to_owned()),
+        None,
+        "gpt-copy-v6".to_owned(),
+    )
+    .with_chat_completions_url(format!("http://{addr}/chat/completions"));
+
+    let error = match provider
+        .stream(ChatProviderRequest {
+            model: "test-model".to_owned(),
+            messages: vec![ProviderMessage {
+                role: "user".to_owned(),
+                content: "hello".to_owned(),
+            }],
+        })
+        .await
+    {
+        Ok(_) => panic!("expected upstream 429 to map to ProviderError::RateLimited"),
+        Err(error) => error,
+    };
+
+    assert!(matches!(error, ProviderError::RateLimited));
 
     server.abort();
 }

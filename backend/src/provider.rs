@@ -188,15 +188,17 @@ impl ChatProvider for OpenRouterProvider {
 
         let mut bytes = response.bytes_stream();
         let stream = try_stream! {
-            let mut buffer = String::new();
+            let mut buffer = Vec::<u8>::new();
             let mut done = false;
 
             while let Some(chunk) = bytes.next().await {
                 let chunk = chunk.map_err(map_reqwest_error)?;
-                buffer.push_str(&String::from_utf8_lossy(&chunk));
+                buffer.extend_from_slice(&chunk);
 
-                while let Some(newline) = buffer.find('\n') {
-                    let line = buffer.drain(..=newline).collect::<String>();
+                while let Some(newline) = buffer.iter().position(|byte| *byte == b'\n') {
+                    let line = buffer.drain(..=newline).collect::<Vec<_>>();
+                    let line = String::from_utf8(line)
+                        .map_err(|error| ProviderError::InvalidResponse(error.to_string()))?;
                     match parse_openrouter_sse_line(&line)? {
                         OpenRouterStreamLine::Content(content) => yield content,
                         OpenRouterStreamLine::Done => {
@@ -212,8 +214,10 @@ impl ChatProvider for OpenRouterProvider {
                 }
             }
 
-            if !done && !buffer.trim().is_empty() {
-                match parse_openrouter_sse_line(&buffer)? {
+            if !done && !buffer.iter().all(u8::is_ascii_whitespace) {
+                let line = String::from_utf8(buffer)
+                    .map_err(|error| ProviderError::InvalidResponse(error.to_string()))?;
+                match parse_openrouter_sse_line(&line)? {
                     OpenRouterStreamLine::Content(content) => yield content,
                     OpenRouterStreamLine::Done => done = true,
                     OpenRouterStreamLine::Skip => {}

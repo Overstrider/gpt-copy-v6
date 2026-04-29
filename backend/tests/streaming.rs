@@ -1,7 +1,9 @@
 mod common;
 
+use axum::body::{Body, to_bytes};
 use axum::http::{Method, StatusCode};
 use serde_json::json;
+use tower::ServiceExt;
 
 use backend::provider::ProviderError;
 
@@ -154,4 +156,83 @@ async fn pre_stream_provider_failure_returns_structured_error_without_assistant_
     .await
     .unwrap();
     assert_eq!(assistant_messages, 0);
+}
+
+#[tokio::test]
+async fn oversized_stream_is_rejected_and_marks_assistant_failed() {
+    let context = common::test_context().await;
+    context
+        .provider
+        .with_stream_text(Ok(vec![Ok("x".repeat(64_001))]));
+    let conversation_id = common::create_conversation(context.app.clone()).await;
+
+    let (status, body) = common::request_text(
+        context.app,
+        Method::POST,
+        &format!("/conversations/{conversation_id}/messages/stream"),
+        Some(json!({ "content": "Stream please" })),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert!(body.contains("event: error"));
+    assert!(body.contains("provider_invalid_response"));
+
+    let failed_messages: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM messages WHERE status = 'failed'")
+            .fetch_one(&context.pool)
+            .await
+            .unwrap();
+    assert_eq!(failed_messages, 1);
+
+    let failed_requests: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM chat_requests WHERE status = 'failed'")
+            .fetch_one(&context.pool)
+            .await
+            .unwrap();
+    assert_eq!(failed_requests, 1);
+}
+
+#[tokio::test]
+async fn client_disconnect_marks_streaming_request_failed() {
+    let context = common::test_context().await;
+    context.provider.with_stream_text(Ok((0..100)
+        .map(|index| Ok(format!("chunk-{index} ")))
+        .collect()));
+    let conversation_id = common::create_conversation(context.app.clone()).await;
+    let request = axum::http::Request::builder()
+        .method(Method::POST)
+        .uri(format!("/conversations/{conversation_id}/messages/stream"))
+        .header("content-type", "application/json")
+        .body(Body::from(r#"{"content":"Stream please"}"#))
+        .unwrap();
+
+    let response = context.app.oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let _ = to_bytes(response.into_body(), 1).await;
+
+    for _ in 0..20 {
+        tokio::task::yield_now().await;
+    }
+
+    let pending_requests: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM chat_requests WHERE status = 'pending'")
+            .fetch_one(&context.pool)
+            .await
+            .unwrap();
+    assert_eq!(pending_requests, 0);
+
+    let failed_requests: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM chat_requests WHERE status = 'failed'")
+            .fetch_one(&context.pool)
+            .await
+            .unwrap();
+    assert_eq!(failed_requests, 1);
+
+    let streaming_messages: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM messages WHERE status = 'streaming'")
+            .fetch_one(&context.pool)
+            .await
+            .unwrap();
+    assert_eq!(streaming_messages, 0);
 }

@@ -117,7 +117,7 @@ export async function listConversations() {
 export async function createConversation(title?: string) {
   const response = await requestJson("/conversations", ConversationResponseSchema, {
     method: "POST",
-    body: JSON.stringify(title ? { title } : {})
+    body: JSON.stringify(title === undefined ? {} : { title })
   });
   return response.conversation;
 }
@@ -165,6 +165,8 @@ export async function streamAssistantMessage(
     throw new ApiError("empty_stream", "The API did not return a stream.", response.status);
   }
 
+  let sawTerminalEvent = false;
+
   await readEventStream(response.body, (event) => {
     if (!event.data) {
       return;
@@ -195,6 +197,7 @@ export async function streamAssistantMessage(
       if (!parsed.success) {
         throw new ApiValidationError("The stream message_complete event was malformed.", parsed.error.issues);
       }
+      sawTerminalEvent = true;
       handlers.onMessageComplete?.(parsed.data.message);
       return;
     }
@@ -208,6 +211,10 @@ export async function streamAssistantMessage(
       throw new ApiError(parsed.data.error.code, parsed.data.error.message, response.status, parsed.data.error.details);
     }
   });
+
+  if (!sawTerminalEvent) {
+    throw new ApiError("stream_incomplete", "The API stream ended before completion.", response.status);
+  }
 }
 
 type StreamEvent = {

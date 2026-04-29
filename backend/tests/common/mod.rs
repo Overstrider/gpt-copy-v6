@@ -36,6 +36,10 @@ impl FakeProvider {
         self.completions.lock().unwrap().push_back(mapped);
     }
 
+    pub fn with_completion_text(self: &Arc<Self>, result: Result<String, ProviderError>) {
+        self.completions.lock().unwrap().push_back(result);
+    }
+
     pub fn with_stream(
         self: &Arc<Self>,
         result: Result<Vec<Result<&str, ProviderError>>, ProviderError>,
@@ -47,6 +51,10 @@ impl FakeProvider {
                 .collect::<Vec<_>>()
         });
         self.streams.lock().unwrap().push_back(mapped);
+    }
+
+    pub fn with_stream_text(self: &Arc<Self>, result: Result<StreamChunks, ProviderError>) {
+        self.streams.lock().unwrap().push_back(result);
     }
 
     pub fn requests(&self) -> Vec<ChatProviderRequest> {

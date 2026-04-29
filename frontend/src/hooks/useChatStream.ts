@@ -57,6 +57,7 @@ export function useChatStream() {
   const selectedConversationIdRef = useRef<string | null>(null);
   const streamConversationIdRef = useRef<string | null>(null);
   const skipNextLoadConversationIdRef = useRef<string | null>(null);
+  const messageVersionRef = useRef(0);
 
   const selectedConversation =
     conversations.find((conversation) => conversation.id === selectedConversationId) ?? null;
@@ -114,6 +115,7 @@ export function useChatStream() {
 
     let cancelled = false;
     const conversationId = selectedConversationId;
+    const loadVersion = messageVersionRef.current;
 
     async function loadMessages() {
       setIsLoadingMessages(true);
@@ -121,10 +123,13 @@ export function useChatStream() {
 
       try {
         const loaded = await listMessages(conversationId);
-        if (!cancelled) {
-          if (selectedConversationIdRef.current === conversationId) {
-            setMessages(loaded);
-          }
+        if (
+          !cancelled &&
+          selectedConversationIdRef.current === conversationId &&
+          streamConversationIdRef.current !== conversationId &&
+          messageVersionRef.current === loadVersion
+        ) {
+          setMessages(loaded);
         }
       } catch (loadError) {
         if (!cancelled) {
@@ -164,6 +169,7 @@ export function useChatStream() {
     setConversations((current) => [conversation, ...current.filter((item) => item.id !== conversation.id)]);
     selectedConversationIdRef.current = conversation.id;
     setSelectedConversationId(conversation.id);
+    messageVersionRef.current += 1;
     setMessages([]);
   }, [abortActiveStream]);
 
@@ -199,6 +205,8 @@ export function useChatStream() {
         }
 
         streamConversationIdRef.current = conversation.id;
+        messageVersionRef.current += 1;
+        setIsLoadingMessages(false);
         const userMessage = localMessage(conversation.id, "user", trimmed);
         setMessages((current) => [...current, userMessage]);
 
