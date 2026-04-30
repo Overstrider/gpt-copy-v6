@@ -1,7 +1,13 @@
 mod common;
 
+use std::path::PathBuf;
+
 use axum::http::{Method, StatusCode};
+use futures_util::future::join_all;
 use serde_json::json;
+use uuid::Uuid;
+
+use backend::db;
 
 #[tokio::test]
 async fn conversations_and_messages_are_persisted() {
@@ -80,4 +86,61 @@ async fn failed_provider_call_records_chat_request_without_assistant_message() {
             .await
             .unwrap();
     assert_eq!(failed_requests, 1);
+}
+
+#[tokio::test]
+async fn overlapping_message_inserts_keep_unique_conversation_ordinals() {
+    let (database_path, database_url) = temporary_database_url();
+    let pool = db::connect_and_migrate(&database_url).await.unwrap();
+    let conversation = db::create_conversation(&pool, "Concurrent ordinals")
+        .await
+        .unwrap();
+
+    let inserts = (0..12).map(|index| {
+        let pool = pool.clone();
+        let conversation_id = conversation.id.clone();
+
+        async move {
+            if index % 2 == 0 {
+                db::insert_message(
+                    &pool,
+                    &conversation_id,
+                    "user",
+                    &format!("parallel message {index}"),
+                )
+                .await
+            } else {
+                db::insert_streaming_assistant_message(&pool, &conversation_id).await
+            }
+        }
+    });
+    let inserted = join_all(inserts)
+        .await
+        .into_iter()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
+
+    assert_eq!(inserted.len(), 12);
+    let ordinals = sqlx::query_scalar::<_, i64>(
+        "SELECT ordinal FROM messages WHERE conversation_id = ? ORDER BY ordinal ASC",
+    )
+    .bind(&conversation.id)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+
+    assert_eq!(ordinals, (0..12).collect::<Vec<_>>());
+
+    pool.close().await;
+    let _ = std::fs::remove_file(&database_path);
+}
+
+fn temporary_database_url() -> (PathBuf, String) {
+    let database_path = std::env::temp_dir().join(format!("gpt-copy-v6-{}.db", Uuid::new_v4()));
+    let database_url = format!(
+        "sqlite:{}",
+        database_path.to_string_lossy().replace('\\', "/")
+    );
+
+    (database_path, database_url)
 }
