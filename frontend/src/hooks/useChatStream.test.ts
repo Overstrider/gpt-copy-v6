@@ -71,6 +71,19 @@ const completedAssistantMessage: Message = {
   completed_at: "2026-04-28T12:00:03Z"
 };
 
+const failedUserMessage: Message = {
+  ...persistedUserMessage,
+  id: "user-failed-stream",
+  content: "Try stream"
+};
+
+const failedAssistantMessage: Message = {
+  ...assistantStartMessage,
+  content: "Partial reply",
+  status: "failed",
+  completed_at: "2026-04-28T12:00:04Z"
+};
+
 function deferred() {
   let resolve: () => void = () => undefined;
   const promise = new Promise<void>((nextResolve) => {
@@ -207,5 +220,33 @@ describe("useChatStream", () => {
 
     expect(result.current.error).toBe("Provider unavailable");
     expect(result.current.isStreaming).toBe(false);
+  });
+
+  it("reconciles partial streamed assistant state after provider errors", async () => {
+    api.listConversations.mockResolvedValue([conversation]);
+    api.listMessages
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([failedUserMessage, failedAssistantMessage]);
+    api.streamAssistantMessage.mockImplementation(
+      async (_conversationId: string, _content: string, handlers: StreamHandlers) => {
+        handlers.onMessageStart?.(assistantStartMessage);
+        handlers.onDelta?.("Partial reply");
+        handlers.onError?.(streamFailure("Provider unavailable"));
+        throw new ApiError("provider_rate_limited", "Provider unavailable", 429);
+      }
+    );
+
+    const { result } = renderHook(() => useChatStream());
+
+    await waitFor(() => expect(result.current.selectedConversationId).toBe("conversation-1"));
+
+    await act(async () => {
+      await result.current.send("Try stream");
+    });
+
+    expect(api.listMessages).toHaveBeenCalledTimes(2);
+    expect(result.current.error).toBe("Provider unavailable");
+    expect(result.current.messages).toEqual([failedUserMessage, failedAssistantMessage]);
+    expect(result.current.messages.some((message) => message.status === "streaming")).toBe(false);
   });
 });

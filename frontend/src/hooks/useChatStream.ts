@@ -224,6 +224,28 @@ export function useChatStream() {
       abortRef.current = controller;
 
       let conversation = selectedConversation;
+      let assistantMessageId: string | null = null;
+
+      const reconcileMessages = async (conversationId: string) => {
+        const persistedMessages = await listMessages(conversationId);
+        if (!controller.signal.aborted && selectedConversationIdRef.current === conversationId) {
+          setMessages((current) => mergePersistedMessages(current, persistedMessages));
+        }
+      };
+
+      const markAssistantFailed = () => {
+        if (!conversation || !assistantMessageId || selectedConversationIdRef.current !== conversation.id) {
+          return;
+        }
+
+        setMessages((current) =>
+          current.map((message) =>
+            message.id === assistantMessageId
+              ? { ...message, status: "failed", completed_at: message.completed_at ?? nowIso() }
+              : message
+          )
+        );
+      };
 
       try {
         if (!conversation) {
@@ -239,8 +261,6 @@ export function useChatStream() {
         setIsLoadingMessages(false);
         const userMessage = localMessage(conversation.id, "user", trimmed);
         setMessages((current) => [...current, userMessage]);
-
-        let assistantMessageId: string | null = null;
 
         await streamAssistantMessage(
           conversation.id,
@@ -295,13 +315,17 @@ export function useChatStream() {
         );
 
         if (!controller.signal.aborted && selectedConversationIdRef.current === conversation.id) {
-          const persistedMessages = await listMessages(conversation.id);
-          if (!controller.signal.aborted && selectedConversationIdRef.current === conversation.id) {
-            setMessages((current) => mergePersistedMessages(current, persistedMessages));
-          }
+          await reconcileMessages(conversation.id);
         }
       } catch (sendError) {
         if (!controller.signal.aborted) {
+          if (conversation && selectedConversationIdRef.current === conversation.id) {
+            try {
+              await reconcileMessages(conversation.id);
+            } catch {
+              markAssistantFailed();
+            }
+          }
           setError(errorMessage(sendError));
         }
       } finally {
