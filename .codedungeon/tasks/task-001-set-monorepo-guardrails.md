@@ -31,7 +31,7 @@ Establish root documentation, placeholder environment example, and ignore rules 
 
 ## Verification Commands
 - git status --short
-- powershell -NoProfile -Command "git grep -n 'OPENROUTER_API_KEY=.*sk-|OPENROUTER_API_KEY=.*or-' -- .; if ($LASTEXITCODE -eq 1) { exit 0 } else { exit $LASTEXITCODE }"
+- powershell -NoProfile -Command "$prefix = 'OPENROUTER' + '_API_KEY=.*'; $pattern = $prefix + 'sk-|' + $prefix + 'or-'; git grep -I -n $pattern -- .; if ($LASTEXITCODE -eq 1) { exit 0 } elseif ($LASTEXITCODE -eq 0) { exit 1 } else { exit $LASTEXITCODE }"
 
 ## Risk Notes
 - README command examples may need a final refresh after scripts and ports are finalized.

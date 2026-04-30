@@ -40,7 +40,7 @@ Update documentation with exact commands, run all available verification, scan t
 - npm --prefix frontend run test
 - npm --prefix frontend run build
 - npm --prefix frontend run test:e2e
-- powershell -NoProfile -Command "git grep -n 'OPENROUTER_API_KEY=.*sk-|OPENROUTER_API_KEY=.*or-' -- .; if ($LASTEXITCODE -eq 1) { exit 0 } else { exit $LASTEXITCODE }"
+- powershell -NoProfile -Command "$prefix = 'OPENROUTER' + '_API_KEY=.*'; $pattern = $prefix + 'sk-|' + $prefix + 'or-'; git grep -I -n $pattern -- .; if ($LASTEXITCODE -eq 1) { exit 0 } elseif ($LASTEXITCODE -eq 0) { exit 1 } else { exit $LASTEXITCODE }"
 
 ## Risk Notes
 - Final verification may expose environment setup issues that need documented remediation.
