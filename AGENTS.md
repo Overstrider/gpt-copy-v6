@@ -1,6 +1,6 @@
 # codedungeon for Codex CLI
 
-Use codedungeon as the deterministic workflow kernel. Preserve the phase flow, DB state, handoff schema, review JSON, and task contracts.
+Use codedungeon as the deterministic workflow kernel. Preserve the phase flow, local DB state, handoff schema, review JSON, and task contracts.
 
 Project artifacts:
 - Workflow skills: `.agents/skills/codedungeon/`, `.agents/skills/main-quest/`, `.agents/skills/side-quest/`, `.agents/skills/one-shot/`, `.agents/skills/code-review/`
@@ -9,6 +9,7 @@ Project artifacts:
 - Codex subagents: `.codex/agents/`
 - Codex skills: `.agents/skills/`
 - Local binary and DB: `./.codex/bin/codedungeon`, `.codedungeon/codedungeon.db`
+- `.codedungeon/codedungeon.db` is runtime-local state. Preserve it on disk during local workflow runs, but do not commit it to PRs; recreate it with `./.codex/bin/codedungeon db init` or workflow commands when needed.
 
 Default workflow:
 - Invoke the promoted workflow router as `$codedungeon --full|--lite|--oneshot|--auto|--rules <prompt>`.
@@ -48,4 +49,3 @@ Compatibility aliases remain installed: `$one-shot`, `$side-quest`, and `$main-q
 Project Rules: workflows read `.codedungeon/project-rules.compact.md` when approved and include `PROJECT_RULES_STATUS`, `PROJECT_RULES_DIGEST`, and `PROJECT_RULES_READ` in handoffs.
 
 Agents in `.codex\agents/`, skills in `.agents\skills/`, commands/phases/mutable state in `.codedungeon/`. CLI binary at `.codex\bin/codedungeon`.
-
