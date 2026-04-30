@@ -164,9 +164,9 @@ describe("api client", () => {
         method === "POST"
       ) {
         return streamResponse([
-          'event: start\ndata: {"message":{"id":"message-assistant-1","conversation_id":"conversation-1","role":"assistant","content":"","status":"streaming","created_at":"2026-04-28T12:00:02Z","completed_at":null}}\n\n',
+          'event: message_start\ndata: {"message":{"id":"message-assistant-1","conversation_id":"conversation-1","role":"assistant","content":"","status":"streaming","created_at":"2026-04-28T12:00:02Z","completed_at":null}}\n\n',
           'event: delta\ndata: {"content":"Hello back"}\n\n',
-          'event: complete\ndata: {"message":{"id":"message-assistant-1","conversation_id":"conversation-1","role":"assistant","content":"Hello back","status":"completed","created_at":"2026-04-28T12:00:02Z","completed_at":"2026-04-28T12:00:03Z"}}\n\n'
+          'event: message_complete\ndata: {"message":{"id":"message-assistant-1","conversation_id":"conversation-1","role":"assistant","content":"Hello back","status":"completed","created_at":"2026-04-28T12:00:02Z","completed_at":"2026-04-28T12:00:03Z"}}\n\n'
         ]);
       }
 
@@ -192,11 +192,11 @@ describe("api client", () => {
     const events: string[] = [];
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       streamResponse([
-        'event: sta',
+        'event: message_sta',
         'rt\ndata: {"message":{"id":"message-assistant-1","conversation_id":"conversation-1","role":"assistant","content":"","status":"streaming","created_at":"2026-04-28T12:00:02Z","completed_at":null}}\n',
         "\n",
         'event: delta\ndata: {"content":"Hello "}\n\n',
-        'event: com',
+        'event: message_com',
         'plete\ndata: {"message":{"id":"message-assistant-1","conversation_id":"conversation-1","role":"assistant","content":"Hello back","status":"completed","created_at":"2026-04-28T12:00:02Z","completed_at":"2026-04-28T12:00:03Z"}}\n\n'
       ])
     );

@@ -1,4 +1,3 @@
-use std::net::SocketAddr;
 use std::sync::Arc;
 
 use backend::config::Config;
@@ -12,7 +11,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     init_tracing();
 
     let config = Config::from_env();
-    let bind_addr: SocketAddr = config.bind_addr.parse()?;
+    let bind_addr = config.bind_socket_addr()?;
     let pool = db::connect_and_migrate(&config.database_url).await?;
     let provider = Arc::new(OpenRouterProvider::new(
         config.openrouter_api_key.clone(),

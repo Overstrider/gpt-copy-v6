@@ -131,7 +131,10 @@ async fn run_provider_stream(
 
     if !send_sse(
         &tx,
-        json_event("start", serde_json::json!({ "message": assistant_message })),
+        json_event(
+            "message_start",
+            serde_json::json!({ "message": assistant_message }),
+        ),
     )
     .await
     {
@@ -238,7 +241,7 @@ async fn run_provider_stream(
             let _ = send_sse(
                 &tx,
                 json_event(
-                    "complete",
+                    "message_complete",
                     serde_json::json!({ "message": assistant_message }),
                 ),
             )

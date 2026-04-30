@@ -25,11 +25,11 @@ async fn streaming_endpoint_emits_contract_events_and_persists_final_assistant_m
 
     assert_eq!(status, StatusCode::OK);
     // Pin the public streaming contract consumed by native fetch clients.
-    assert!(body.contains("event: start"));
+    assert!(body.contains("event: message_start"));
     assert!(body.contains("event: delta"));
     assert!(body.contains(r#""content":"hello""#));
     assert!(body.contains(r#""content":"stream""#));
-    assert!(body.contains("event: complete"));
+    assert!(body.contains("event: message_complete"));
 
     let (_, messages_body) = common::request_json(
         context.app.clone(),
@@ -73,7 +73,7 @@ async fn streaming_interrupted_provider_error_emits_error_event_and_marks_reques
     .await;
 
     assert_eq!(status, StatusCode::OK);
-    assert!(body.contains("event: start"));
+    assert!(body.contains("event: message_start"));
     assert!(body.contains("event: delta"));
     assert!(body.contains("event: error"));
     assert!(body.contains("provider_stream_interrupted"));

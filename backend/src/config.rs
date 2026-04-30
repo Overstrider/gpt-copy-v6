@@ -1,4 +1,7 @@
 use std::env;
+use std::error::Error;
+use std::fmt;
+use std::net::SocketAddr;
 
 pub const DEFAULT_OPENROUTER_MODEL: &str = "nvidia/nemotron-3-super-120b-a12b:free";
 
@@ -39,6 +42,22 @@ impl Config {
             openrouter_title: "gpt-copy-v6-tests".to_owned(),
         }
     }
+
+    pub fn bind_socket_addr(&self) -> Result<SocketAddr, ConfigError> {
+        let bind_addr = self.bind_addr.parse::<SocketAddr>().map_err(|source| {
+            ConfigError(format!(
+                "BACKEND_BIND_ADDR must be a socket address: {source}"
+            ))
+        })?;
+
+        if !bind_addr.ip().is_loopback() {
+            return Err(ConfigError(format!(
+                "BACKEND_BIND_ADDR must bind to a loopback address unless authentication is configured: {bind_addr}"
+            )));
+        }
+
+        Ok(bind_addr)
+    }
 }
 
 fn non_empty_env(name: &str) -> Option<String> {
@@ -47,3 +66,14 @@ fn non_empty_env(name: &str) -> Option<String> {
         .map(|value| value.trim().to_owned())
         .filter(|value| !value.is_empty())
 }
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConfigError(String);
+
+impl fmt::Display for ConfigError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl Error for ConfigError {}
