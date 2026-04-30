@@ -12,13 +12,28 @@ PROJECT_RULES_READ: yes
 - `frontend/`: Next.js App Router, TypeScript, Tailwind, chat UI, component tests, Playwright smoke test.
 - `.env.example`: placeholder-only local environment template.
 
+## Setup
+
+Run setup from the repository root. Install a standard Rust toolchain and Node.js/npm first, then install the locked frontend dependencies and create a local environment file:
+
+```powershell
+rustc --version
+cargo --version
+node --version
+npm --version
+npm --prefix frontend ci
+Copy-Item .env.example .env
+```
+
+The backend uses Cargo directly from `backend/`; no generated build output or local database should be committed.
+
 ## Environment
 
-Copy `.env.example` to `.env` for local development and set a real OpenRouter key only in `.env`.
+Keep real secrets only in ignored local `.env` files. OpenRouter calls must stay server-side in the backend.
 
 ```dotenv
 OPENROUTER_API_KEY=
-OPENROUTER_MODEL=nvidia/nemotron-3-super-120b-a12b:free
+OPENROUTER_MODEL=
 OPENROUTER_HTTP_REFERER=http://localhost:3000
 OPENROUTER_TITLE=gpt-copy-v6
 DATABASE_URL=sqlite:gpt-copy-v6.db
@@ -26,14 +41,12 @@ BACKEND_BIND_ADDR=127.0.0.1:8080
 NEXT_PUBLIC_API_BASE_URL=http://localhost:8080
 ```
 
-Never commit a real provider key. OpenRouter requests are made by the backend only.
+`OPENROUTER_API_KEY` is required for real provider calls. Leave `OPENROUTER_MODEL` empty or unset to use the backend default: `nvidia/nemotron-3-super-120b-a12b:free`.
 
-## Backend
+## Backend Run
 
 ```powershell
-Push-Location backend
-cargo run
-Pop-Location
+cargo run --manifest-path backend/Cargo.toml
 ```
 
 Health check:
@@ -42,55 +55,35 @@ Health check:
 Invoke-RestMethod http://127.0.0.1:8080/health
 ```
 
-Backend verification:
+## Frontend Run
 
 ```powershell
-Push-Location backend
-cargo fmt -- --check
-cargo check
-cargo clippy --all-targets -- -D warnings
-cargo test
-cargo build
-Pop-Location
+npm --prefix frontend run dev
 ```
 
-## Frontend
+Open `http://localhost:3000`. The frontend defaults to `http://localhost:8080` when `NEXT_PUBLIC_API_BASE_URL` is empty or unset.
+
+## Tests
+
+Backend verification from the repository root:
 
 ```powershell
-Push-Location frontend
-npm install
-npm run dev
-Pop-Location
+cargo fmt --manifest-path backend/Cargo.toml --all -- --check
+cargo clippy --manifest-path backend/Cargo.toml --all-targets -- -D warnings
+cargo test --manifest-path backend/Cargo.toml
+cargo build --manifest-path backend/Cargo.toml
 ```
 
-Open `http://localhost:3000`.
-
-Frontend verification:
+Frontend verification from the repository root:
 
 ```powershell
-Push-Location frontend
-npm run lint
-npm run test
-npm run build
-npx playwright test
-Pop-Location
+npm --prefix frontend run lint
+npm --prefix frontend run test
+npm --prefix frontend run build
+npm --prefix frontend run test:e2e
 ```
 
-## Local Development
-
-Use two terminals:
-
-```powershell
-Push-Location backend
-cargo run
-```
-
-```powershell
-Push-Location frontend
-npm run dev
-```
-
-The frontend defaults to `http://localhost:8080` when `NEXT_PUBLIC_API_BASE_URL` is not set. Set it in `frontend/.env.local` only when the backend uses a different origin. The backend reads `OPENROUTER_API_KEY`, `OPENROUTER_MODEL`, `DATABASE_URL`, and `BACKEND_BIND_ADDR`.
+Automated tests should use mocks and isolated SQLite databases instead of real OpenRouter quota.
 
 ## API
 
@@ -105,10 +98,37 @@ The streaming endpoint returns `text/event-stream` events: `message_start`, `del
 
 ## Troubleshooting
 
-- `OpenRouter API key is missing`: set `OPENROUTER_API_KEY` in local `.env`.
-- `database is locked`: stop duplicate backend processes and retry; tests use isolated SQLite databases.
-- Frontend API errors: confirm the backend is running on `BACKEND_BIND_ADDR` and `NEXT_PUBLIC_API_BASE_URL` points to it.
-- Playwright browser missing: run `npx playwright install chromium` from `frontend/`.
+- Confirm the backend is reachable:
+
+```powershell
+Invoke-RestMethod http://127.0.0.1:8080/health
+```
+
+- Check whether the backend or frontend ports are already in use:
+
+```powershell
+Get-NetTCPConnection -LocalPort 8080,3000 -ErrorAction SilentlyContinue | Select-Object LocalAddress,LocalPort,OwningProcess
+```
+
+- Reinstall locked frontend dependencies:
+
+```powershell
+npm --prefix frontend ci
+```
+
+- Install the Playwright Chromium browser:
+
+```powershell
+npm --prefix frontend exec playwright install chromium
+```
+
+- Re-run the smoke test after the backend and frontend are available:
+
+```powershell
+npm --prefix frontend run test:e2e
+```
+
+`OpenRouter API key is missing` means `OPENROUTER_API_KEY` is not set in local `.env`. `database is locked` usually means another backend process is holding the SQLite file; stop the duplicate process and retry.
 
 ## Secret Handling
 

@@ -174,7 +174,9 @@ export async function streamAssistantMessage(
 
     const payload = JSON.parse(event.data) as unknown;
 
-    if (event.type === "message_start") {
+    const eventType = normalizeStreamEventType(event.type);
+
+    if (eventType === "message_start") {
       const parsed = StreamMessageStartSchema.safeParse(payload);
       if (!parsed.success) {
         throw new ApiValidationError("The stream message_start event was malformed.", parsed.error.issues);
@@ -183,7 +185,7 @@ export async function streamAssistantMessage(
       return;
     }
 
-    if (event.type === "delta") {
+    if (eventType === "delta") {
       const parsed = StreamDeltaSchema.safeParse(payload);
       if (!parsed.success) {
         throw new ApiValidationError("The stream delta event was malformed.", parsed.error.issues);
@@ -192,7 +194,7 @@ export async function streamAssistantMessage(
       return;
     }
 
-    if (event.type === "message_complete") {
+    if (eventType === "message_complete") {
       const parsed = StreamMessageCompleteSchema.safeParse(payload);
       if (!parsed.success) {
         throw new ApiValidationError("The stream message_complete event was malformed.", parsed.error.issues);
@@ -202,7 +204,7 @@ export async function streamAssistantMessage(
       return;
     }
 
-    if (event.type === "error") {
+    if (eventType === "error") {
       const parsed = StreamErrorSchema.safeParse(payload);
       if (!parsed.success) {
         throw new ApiValidationError("The stream error event was malformed.", parsed.error.issues);
@@ -221,6 +223,18 @@ type StreamEvent = {
   type: string;
   data: string;
 };
+
+function normalizeStreamEventType(type: string) {
+  if (type === "start") {
+    return "message_start";
+  }
+
+  if (type === "complete") {
+    return "message_complete";
+  }
+
+  return type;
+}
 
 async function readEventStream(body: ReadableStream<Uint8Array>, onEvent: (event: StreamEvent) => void) {
   const reader = body.getReader();

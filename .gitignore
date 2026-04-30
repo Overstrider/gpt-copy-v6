@@ -1,23 +1,46 @@
+# Local environment and secrets
 .env
 .env.*
 !.env.example
 
+# SQLite databases and sidecar files
 *.db
+*.db-journal
+*.db-shm
+*.db-wal
 *.sqlite
+*.sqlite-journal
+*.sqlite-shm
+*.sqlite-wal
 *.sqlite3
+*.sqlite3-journal
+*.sqlite3-shm
+*.sqlite3-wal
 
+# Rust build output
+target/
 backend/target/
 backend/.sqlx/
-backend/*.db
-backend/*.sqlite
-backend/*.sqlite3
 
-frontend/.next/
+# Node and Next.js build output
+node_modules/
 frontend/node_modules/
-frontend/test-results/
-frontend/playwright-report/
-frontend/coverage/
+.next/
+frontend/.next/
+out/
+frontend/out/
 frontend/*.tsbuildinfo
 
+# Test and coverage output
+coverage/
+frontend/coverage/
+test-results/
+frontend/test-results/
+playwright-report/
+frontend/playwright-report/
+
+# CodeDungeon local runtime artifacts
+.codedungeon/*.db
+.codedungeon/*.db-*
 .codedungeon/*.db-journal
 .codedungeon/logs/

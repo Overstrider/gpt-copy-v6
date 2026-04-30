@@ -17,7 +17,14 @@ const MAX_TITLE_LEN: usize = 120;
 pub async fn list_conversations(
     State(state): State<AppState>,
 ) -> Result<Json<ListConversationsResponse>, AppError> {
-    let conversations = db::list_conversations(&state.pool).await?;
+    let mut conversations = db::list_conversations(&state.pool).await?;
+    conversations.sort_by(|left, right| {
+        right
+            .updated_at
+            .cmp(&left.updated_at)
+            .then_with(|| right.created_at.cmp(&left.created_at))
+            .then_with(|| left.id.cmp(&right.id))
+    });
 
     Ok(Json(ListConversationsResponse { conversations }))
 }

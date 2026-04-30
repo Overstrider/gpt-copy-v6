@@ -5,6 +5,7 @@ mod health;
 use axum::Router;
 use axum::routing::{get, post};
 
+use crate::error::AppError;
 use crate::state::AppState;
 
 pub fn router(state: AppState) -> Router {
@@ -22,5 +23,10 @@ pub fn router(state: AppState) -> Router {
             "/conversations/{id}/messages/stream",
             post(chat::stream_message),
         )
+        .fallback(route_not_found)
         .with_state(state)
+}
+
+async fn route_not_found() -> AppError {
+    AppError::not_found("route not found")
 }

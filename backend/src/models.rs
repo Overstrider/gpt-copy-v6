@@ -20,6 +20,18 @@ pub struct Message {
     pub completed_at: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, FromRow)]
+pub struct ChatRequest {
+    pub id: String,
+    pub conversation_id: String,
+    pub user_message_id: String,
+    pub assistant_message_id: Option<String>,
+    pub status: String,
+    pub error_code: Option<String>,
+    pub created_at: String,
+    pub completed_at: Option<String>,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct CreateConversationRequest {
     pub title: Option<String>,

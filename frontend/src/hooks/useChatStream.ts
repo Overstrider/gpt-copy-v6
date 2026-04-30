@@ -33,6 +33,36 @@ function titleFromMessage(content: string) {
   return trimmed.length > 48 ? `${trimmed.slice(0, 45)}...` : trimmed || "New chat";
 }
 
+function isOptimisticEquivalent(persisted: Message, candidate: Message) {
+  return (
+    candidate.id.startsWith(`local-${persisted.role}-`) &&
+    candidate.conversation_id === persisted.conversation_id &&
+    candidate.role === persisted.role &&
+    candidate.content === persisted.content
+  );
+}
+
+function mergePersistedMessages(current: Message[], persisted: Message[]) {
+  if (persisted.length === 0) {
+    return current;
+  }
+
+  const merged = [...persisted];
+
+  for (const currentMessage of current) {
+    const alreadyRepresented = merged.some(
+      (persistedMessage) =>
+        persistedMessage.id === currentMessage.id || isOptimisticEquivalent(persistedMessage, currentMessage)
+    );
+
+    if (!alreadyRepresented) {
+      merged.push(currentMessage);
+    }
+  }
+
+  return merged;
+}
+
 function errorMessage(error: unknown) {
   if (error instanceof ApiError) {
     return error.message;
@@ -263,6 +293,13 @@ export function useChatStream() {
           },
           controller.signal
         );
+
+        if (!controller.signal.aborted && selectedConversationIdRef.current === conversation.id) {
+          const persistedMessages = await listMessages(conversation.id);
+          if (!controller.signal.aborted && selectedConversationIdRef.current === conversation.id) {
+            setMessages((current) => mergePersistedMessages(current, persistedMessages));
+          }
+        }
       } catch (sendError) {
         if (!controller.signal.aborted) {
           setError(errorMessage(sendError));
@@ -291,6 +328,7 @@ export function useChatStream() {
     error,
     send,
     selectConversation,
-    startConversation
+    startConversation,
+    cancelStream: abortActiveStream
   };
 }

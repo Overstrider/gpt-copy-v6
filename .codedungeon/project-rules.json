@@ -2,10 +2,10 @@
   "status": "approved",
   "rules_path": ".codedungeon/project-rules.md",
   "compact_path": ".codedungeon/project-rules.compact.md",
-  "source_digest": "1042136941ca8b6f3a74e93e2a9f0a6e6ec922e98f1c3e0d5c1267e9e542824c",
+  "source_digest": "491e3947a31b9b77544be75c17469961b614df8b80082e9b3adf2e002bc4a5d8",
   "rules_digest": "be792d27d9969ae5ed95a5caa5de79b0b97d20bbd97ec73bf92cd031941e9d31",
-  "approved_at": "2026-04-28T22:42:50Z",
-  "approved_by": "codedungeon-child-runner",
+  "approved_at": "2026-04-30T17:19:14Z",
+  "approved_by": "TASK-012",
   "sources": [
     ".env.example",
     "AGENTS.md",

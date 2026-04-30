@@ -4,7 +4,7 @@ use sqlx::SqlitePool;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use uuid::Uuid;
 
-use crate::models::{Conversation, Message};
+use crate::models::{ChatRequest, Conversation, Message};
 
 pub async fn connect_and_migrate(database_url: &str) -> Result<SqlitePool, sqlx::Error> {
     let options = SqliteConnectOptions::from_str(database_url)?
@@ -213,12 +213,33 @@ pub async fn create_chat_request(
     Ok(id)
 }
 
+pub async fn get_chat_request(
+    pool: &SqlitePool,
+    id: &str,
+) -> Result<Option<ChatRequest>, sqlx::Error> {
+    sqlx::query_as::<_, ChatRequest>(
+        "SELECT id,
+                conversation_id,
+                user_message_id,
+                assistant_message_id,
+                status,
+                error_code,
+                created_at,
+                completed_at
+         FROM chat_requests
+         WHERE id = ?",
+    )
+    .bind(id)
+    .fetch_optional(pool)
+    .await
+}
+
 pub async fn mark_chat_request_succeeded(
     pool: &SqlitePool,
     request_id: &str,
     assistant_message_id: &str,
 ) -> Result<(), sqlx::Error> {
-    sqlx::query(
+    let result = sqlx::query(
         "UPDATE chat_requests
          SET status = 'succeeded',
              assistant_message_id = ?,
@@ -230,6 +251,9 @@ pub async fn mark_chat_request_succeeded(
     .bind(request_id)
     .execute(pool)
     .await?;
+    if result.rows_affected() == 0 {
+        return Err(sqlx::Error::RowNotFound);
+    }
 
     Ok(())
 }
@@ -239,7 +263,7 @@ pub async fn mark_chat_request_failed(
     request_id: &str,
     error_code: &str,
 ) -> Result<(), sqlx::Error> {
-    sqlx::query(
+    let result = sqlx::query(
         "UPDATE chat_requests
          SET status = 'failed',
              error_code = ?,
@@ -250,6 +274,9 @@ pub async fn mark_chat_request_failed(
     .bind(request_id)
     .execute(pool)
     .await?;
+    if result.rows_affected() == 0 {
+        return Err(sqlx::Error::RowNotFound);
+    }
 
     Ok(())
 }
@@ -274,4 +301,88 @@ async fn touch_conversation(pool: &SqlitePool, conversation_id: &str) -> Result<
     .await?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // These tests pin the repository helpers directly so the task's filtered
+    // verification commands exercise SQLite persistence instead of only routes.
+    #[tokio::test]
+    async fn db_repository_helpers_persist_conversation_messages_and_request_status() {
+        let pool = connect_and_migrate("sqlite::memory:").await.unwrap();
+
+        let conversation = create_conversation(&pool, "Persistence test")
+            .await
+            .unwrap();
+        let conversations = list_conversations(&pool).await.unwrap();
+        assert_eq!(conversations.len(), 1);
+        assert_eq!(conversations[0].id, conversation.id);
+
+        let user_message = insert_message(&pool, &conversation.id, "user", "hello")
+            .await
+            .unwrap();
+        let request_id = create_chat_request(&pool, &conversation.id, &user_message.id)
+            .await
+            .unwrap();
+        let pending_request = get_chat_request(&pool, &request_id).await.unwrap().unwrap();
+        assert_eq!(pending_request.status, "pending");
+        assert!(pending_request.completed_at.is_none());
+
+        let assistant_message = insert_message(&pool, &conversation.id, "assistant", "hi")
+            .await
+            .unwrap();
+        mark_chat_request_succeeded(&pool, &request_id, &assistant_message.id)
+            .await
+            .unwrap();
+        let succeeded_request = get_chat_request(&pool, &request_id).await.unwrap().unwrap();
+        assert_eq!(succeeded_request.status, "succeeded");
+        assert_eq!(
+            succeeded_request.assistant_message_id.as_deref(),
+            Some(assistant_message.id.as_str())
+        );
+        assert!(succeeded_request.completed_at.is_some());
+
+        let failed_user_message = insert_message(&pool, &conversation.id, "user", "retry")
+            .await
+            .unwrap();
+        let failed_request_id =
+            create_chat_request(&pool, &conversation.id, &failed_user_message.id)
+                .await
+                .unwrap();
+        mark_chat_request_failed(&pool, &failed_request_id, "provider_rate_limited")
+            .await
+            .unwrap();
+        let failed_request = get_chat_request(&pool, &failed_request_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(failed_request.status, "failed");
+        assert_eq!(
+            failed_request.error_code.as_deref(),
+            Some("provider_rate_limited")
+        );
+        assert!(failed_request.assistant_message_id.is_none());
+        assert!(failed_request.completed_at.is_some());
+
+        let messages = list_messages(&pool, &conversation.id).await.unwrap();
+        assert_eq!(messages.len(), 3);
+        assert_eq!(messages[0].id, user_message.id);
+        assert_eq!(messages[1].id, assistant_message.id);
+        assert_eq!(messages[2].id, failed_user_message.id);
+    }
+
+    #[tokio::test]
+    async fn persistence_in_memory_databases_are_isolated_per_pool() {
+        let first_pool = connect_and_migrate("sqlite::memory:").await.unwrap();
+        let second_pool = connect_and_migrate("sqlite::memory:").await.unwrap();
+
+        create_conversation(&first_pool, "first").await.unwrap();
+
+        let first_conversations = list_conversations(&first_pool).await.unwrap();
+        let second_conversations = list_conversations(&second_pool).await.unwrap();
+        assert_eq!(first_conversations.len(), 1);
+        assert!(second_conversations.is_empty());
+    }
 }

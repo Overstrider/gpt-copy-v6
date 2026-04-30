@@ -8,7 +8,7 @@ use tower::ServiceExt;
 use backend::provider::ProviderError;
 
 #[tokio::test]
-async fn stream_endpoint_emits_chunks_and_persists_final_assistant_message() {
+async fn streaming_endpoint_emits_contract_events_and_persists_final_assistant_message() {
     let context = common::test_context().await;
     context
         .provider
@@ -24,14 +24,15 @@ async fn stream_endpoint_emits_chunks_and_persists_final_assistant_message() {
     .await;
 
     assert_eq!(status, StatusCode::OK);
-    assert!(body.contains("event: message_start"));
+    // Pin the public streaming contract consumed by native fetch clients.
+    assert!(body.contains("event: start"));
     assert!(body.contains("event: delta"));
     assert!(body.contains(r#""content":"hello""#));
     assert!(body.contains(r#""content":"stream""#));
-    assert!(body.contains("event: message_complete"));
+    assert!(body.contains("event: complete"));
 
     let (_, messages_body) = common::request_json(
-        context.app,
+        context.app.clone(),
         Method::GET,
         &format!("/conversations/{conversation_id}/messages"),
         None,
@@ -40,10 +41,22 @@ async fn stream_endpoint_emits_chunks_and_persists_final_assistant_message() {
     assert_eq!(messages_body["messages"].as_array().unwrap().len(), 2);
     assert_eq!(messages_body["messages"][1]["content"], "hello stream");
     assert_eq!(messages_body["messages"][1]["status"], "completed");
+
+    let assistant_message_id = messages_body["messages"][1]["id"].as_str().unwrap();
+    let request: (String, Option<String>, Option<String>) = sqlx::query_as(
+        "SELECT status, assistant_message_id, error_code FROM chat_requests WHERE conversation_id = ?",
+    )
+    .bind(&conversation_id)
+    .fetch_one(&context.pool)
+    .await
+    .unwrap();
+    assert_eq!(request.0, "succeeded");
+    assert_eq!(request.1.as_deref(), Some(assistant_message_id));
+    assert!(request.2.is_none());
 }
 
 #[tokio::test]
-async fn interrupted_stream_emits_error_event_and_marks_request_failed() {
+async fn streaming_interrupted_provider_error_emits_error_event_and_marks_request_failed() {
     let context = common::test_context().await;
     context.provider.with_stream(Ok(vec![
         Ok("partial"),
@@ -60,7 +73,7 @@ async fn interrupted_stream_emits_error_event_and_marks_request_failed() {
     .await;
 
     assert_eq!(status, StatusCode::OK);
-    assert!(body.contains("event: message_start"));
+    assert!(body.contains("event: start"));
     assert!(body.contains("event: delta"));
     assert!(body.contains("event: error"));
     assert!(body.contains("provider_stream_interrupted"));
@@ -89,7 +102,7 @@ async fn interrupted_stream_emits_error_event_and_marks_request_failed() {
 }
 
 #[tokio::test]
-async fn failed_streamed_assistant_content_is_excluded_from_next_provider_prompt() {
+async fn streaming_failed_assistant_content_is_excluded_from_next_provider_prompt() {
     let context = common::test_context().await;
     context.provider.with_stream(Ok(vec![
         Ok("partial"),
@@ -130,7 +143,7 @@ async fn failed_streamed_assistant_content_is_excluded_from_next_provider_prompt
 }
 
 #[tokio::test]
-async fn pre_stream_provider_failure_returns_structured_error_without_assistant_placeholder() {
+async fn streaming_pre_stream_provider_failure_has_no_assistant_placeholder() {
     let context = common::test_context().await;
     context
         .provider
@@ -159,7 +172,47 @@ async fn pre_stream_provider_failure_returns_structured_error_without_assistant_
 }
 
 #[tokio::test]
-async fn oversized_stream_is_rejected_and_marks_assistant_failed() {
+async fn streaming_pre_stream_timeout_marks_request_failed_without_assistant_placeholder() {
+    let context = common::test_context().await;
+    context.provider.with_stream(Err(ProviderError::Timeout));
+    let conversation_id = common::create_conversation(context.app.clone()).await;
+
+    let (status, body) = common::request_json(
+        context.app,
+        Method::POST,
+        &format!("/conversations/{conversation_id}/messages/stream"),
+        Some(json!({ "content": "Stream please" })),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::GATEWAY_TIMEOUT);
+    assert_eq!(body["error"]["code"], "provider_timeout");
+
+    let counts: (i64, i64) = sqlx::query_as(
+        "SELECT
+            SUM(CASE WHEN role = 'user' THEN 1 ELSE 0 END),
+            SUM(CASE WHEN role = 'assistant' THEN 1 ELSE 0 END)
+         FROM messages
+         WHERE conversation_id = ?",
+    )
+    .bind(&conversation_id)
+    .fetch_one(&context.pool)
+    .await
+    .unwrap();
+    assert_eq!(counts, (1, 0));
+
+    let request: (String, Option<String>) =
+        sqlx::query_as("SELECT status, error_code FROM chat_requests WHERE conversation_id = ?")
+            .bind(&conversation_id)
+            .fetch_one(&context.pool)
+            .await
+            .unwrap();
+    assert_eq!(request.0, "failed");
+    assert_eq!(request.1.as_deref(), Some("provider_timeout"));
+}
+
+#[tokio::test]
+async fn streaming_oversized_stream_is_rejected_and_marks_assistant_failed() {
     let context = common::test_context().await;
     context
         .provider
@@ -211,9 +264,7 @@ async fn client_disconnect_marks_streaming_request_failed() {
     assert_eq!(response.status(), StatusCode::OK);
     let _ = to_bytes(response.into_body(), 1).await;
 
-    for _ in 0..20 {
-        tokio::task::yield_now().await;
-    }
+    wait_for_stream_disconnect_state(&context.pool).await;
 
     let pending_requests: i64 =
         sqlx::query_scalar("SELECT COUNT(*) FROM chat_requests WHERE status = 'pending'")
@@ -235,4 +286,27 @@ async fn client_disconnect_marks_streaming_request_failed() {
             .await
             .unwrap();
     assert_eq!(streaming_messages, 0);
+}
+
+async fn wait_for_stream_disconnect_state(pool: &sqlx::SqlitePool) {
+    // Disconnect is observed by the background SSE task after the response body is dropped.
+    // Poll the persisted state instead of depending on a fixed number of scheduler yields.
+    for _ in 0..200 {
+        let pending_requests: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM chat_requests WHERE status = 'pending'")
+                .fetch_one(pool)
+                .await
+                .unwrap();
+        let streaming_messages: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM messages WHERE status = 'streaming'")
+                .fetch_one(pool)
+                .await
+                .unwrap();
+
+        if pending_requests == 0 && streaming_messages == 0 {
+            return;
+        }
+
+        tokio::task::yield_now().await;
+    }
 }

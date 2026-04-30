@@ -32,6 +32,7 @@ export function ChatApp() {
     startConversation
   } = useChatStream();
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const mobileSidebarId = "mobile-conversation-sidebar";
 
   const sidebar = (
     <Sidebar
@@ -57,14 +58,20 @@ export function ChatApp() {
       </div>
 
       {isSidebarOpen ? (
-        <div className="fixed inset-0 z-40 flex md:hidden">
+        <div
+          id={mobileSidebarId}
+          role="dialog"
+          aria-modal="true"
+          aria-label="Conversation sidebar"
+          className="fixed inset-0 z-40 flex md:hidden"
+        >
           <button
             type="button"
             aria-label="Close sidebar"
             className="absolute inset-0 bg-black/30"
             onClick={() => setIsSidebarOpen(false)}
           />
-          <div className="relative z-10 w-[82vw] max-w-80 border-r border-neutral-200 bg-[#ededdf] shadow-xl">
+          <div className="relative z-10 h-full w-[82vw] max-w-80 border-r border-neutral-200 bg-[#ededdf] shadow-xl">
             {sidebar}
           </div>
         </div>
@@ -75,6 +82,8 @@ export function ChatApp() {
           <button
             type="button"
             aria-label="Open sidebar"
+            aria-controls={mobileSidebarId}
+            aria-expanded={isSidebarOpen}
             className="inline-flex h-10 w-10 items-center justify-center rounded-md text-neutral-700 hover:bg-neutral-100 md:hidden"
             onClick={() => setIsSidebarOpen(true)}
           >
@@ -133,7 +142,7 @@ function Sidebar({
         </button>
         <button
           type="button"
-          aria-label="Close sidebar"
+          aria-label="Collapse sidebar"
           onClick={onClose}
           className="inline-flex h-10 w-10 items-center justify-center rounded-md text-neutral-700 hover:bg-black/5 md:hidden"
         >
@@ -183,7 +192,7 @@ function ErrorBanner({ message }: { message: string }) {
     <div role="alert" className="border-b border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
       <div className="mx-auto flex max-w-3xl items-start gap-2">
         <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
-        <span>{message}</span>
+        <span className="min-w-0 break-words">{message}</span>
       </div>
     </div>
   );
@@ -259,23 +268,42 @@ function MessageBubble({ message }: { message: Message }) {
   return (
     <article className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
       <div
-        className={`max-w-[92%] rounded-md px-4 py-3 text-sm leading-6 md:max-w-[78%] ${
+        className={`min-w-0 max-w-[92%] break-words rounded-md px-4 py-3 text-sm leading-6 md:max-w-[78%] ${
           isUser
             ? "bg-emerald-700 text-white"
             : "border border-neutral-200 bg-white text-neutral-900 shadow-sm"
         }`}
       >
         {isUser ? (
-          <p className="whitespace-pre-wrap">{content}</p>
+          <p className="whitespace-pre-wrap break-words">{content}</p>
         ) : (
           <ReactMarkdown
             remarkPlugins={[remarkGfm]}
             components={{
-              p: ({ children }) => <p className="mb-3 last:mb-0">{children}</p>,
+              p: ({ children }) => <p className="mb-3 break-words last:mb-0">{children}</p>,
               ul: ({ children }) => <ul className="mb-3 list-disc pl-5 last:mb-0">{children}</ul>,
               ol: ({ children }) => <ol className="mb-3 list-decimal pl-5 last:mb-0">{children}</ol>,
+              a: ({ children, href }) => (
+                <a className="break-all text-emerald-700 underline underline-offset-2" href={href}>
+                  {children}
+                </a>
+              ),
+              table: ({ children }) => (
+                <table className="mb-3 block max-w-full overflow-x-auto whitespace-normal text-left text-sm last:mb-0">
+                  {children}
+                </table>
+              ),
+              th: ({ children }) => (
+                <th className="border border-neutral-200 bg-neutral-50 px-2 py-1 font-semibold">
+                  {children}
+                </th>
+              ),
+              td: ({ children }) => (
+                <td className="border border-neutral-200 px-2 py-1 align-top">{children}</td>
+              ),
+              input: (props) => <input {...props} className="mr-2 align-middle" />,
               code: ({ children }) => (
-                <code className="rounded bg-neutral-100 px-1 py-0.5 text-[0.92em] text-neutral-900">
+                <code className="break-words rounded bg-neutral-100 px-1 py-0.5 text-[0.92em] text-neutral-900">
                   {children}
                 </code>
               ),
@@ -333,7 +361,7 @@ function Composer({
             }
           }}
           placeholder="Message gpt-copy-v6"
-          className="max-h-36 min-h-10 flex-1 resize-none bg-transparent px-2 py-2 text-sm text-neutral-950 outline-none placeholder:text-neutral-400"
+          className="max-h-36 min-h-10 min-w-0 flex-1 resize-none bg-transparent px-2 py-2 text-sm text-neutral-950 outline-none placeholder:text-neutral-400"
           disabled={disabled}
         />
         <button
