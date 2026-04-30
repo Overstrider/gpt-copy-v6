@@ -234,6 +234,14 @@ async fn run_provider_stream(
             {
                 tracing::error!(error = ?db_error, "failed to mark stream request succeeded");
                 let app_error = AppError::from(db_error);
+                fail_stream_state(
+                    &pool,
+                    &request_id,
+                    Some(&assistant_message.id),
+                    &assistant_content,
+                    &app_error,
+                )
+                .await;
                 let _ = send_sse(&tx, error_event(&app_error)).await;
                 return;
             }
@@ -250,6 +258,14 @@ async fn run_provider_stream(
         Err(db_error) => {
             tracing::error!(error = ?db_error, "failed to persist streamed assistant message");
             let app_error = AppError::from(db_error);
+            fail_stream_state(
+                &pool,
+                &request_id,
+                Some(&assistant_message.id),
+                &assistant_content,
+                &app_error,
+            )
+            .await;
             let _ = send_sse(&tx, error_event(&app_error)).await;
         }
     }
