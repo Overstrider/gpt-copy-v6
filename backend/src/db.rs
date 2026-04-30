@@ -1,7 +1,7 @@
 use std::{str::FromStr, time::Duration};
 
-use sqlx::SqlitePool;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
+use sqlx::{SqliteConnection, SqlitePool};
 use uuid::Uuid;
 
 use crate::models::{ChatRequest, Conversation, Message};
@@ -131,6 +131,51 @@ pub async fn insert_streaming_assistant_message(
         .ok_or(sqlx::Error::RowNotFound)
 }
 
+pub async fn insert_assistant_message_and_mark_chat_request_succeeded(
+    pool: &SqlitePool,
+    conversation_id: &str,
+    content: &str,
+    request_id: &str,
+) -> Result<Message, sqlx::Error> {
+    let id = Uuid::new_v4().to_string();
+    let mut connection = pool.acquire().await?;
+    sqlx::query("BEGIN IMMEDIATE")
+        .execute(&mut *connection)
+        .await?;
+
+    let result = async {
+        insert_message_row_in_connection(
+            &mut connection,
+            &id,
+            conversation_id,
+            "assistant",
+            content,
+            "completed",
+        )
+        .await?;
+        mark_chat_request_succeeded_in_connection(&mut connection, request_id, &id).await?;
+
+        Ok::<(), sqlx::Error>(())
+    }
+    .await;
+
+    if let Err(error) = result {
+        let _ = sqlx::query("ROLLBACK").execute(&mut *connection).await;
+        return Err(error);
+    }
+
+    if let Err(error) = sqlx::query("COMMIT").execute(&mut *connection).await {
+        let _ = sqlx::query("ROLLBACK").execute(&mut *connection).await;
+        return Err(error);
+    }
+
+    drop(connection);
+
+    get_message(pool, &id)
+        .await?
+        .ok_or(sqlx::Error::RowNotFound)
+}
+
 async fn insert_message_row(
     pool: &SqlitePool,
     id: &str,
@@ -145,36 +190,14 @@ async fn insert_message_row(
         .await?;
 
     let result = async {
-        let ordinal = sqlx::query_scalar::<_, i64>(
-            "SELECT COALESCE(MAX(ordinal) + 1, 0)
-             FROM messages
-             WHERE conversation_id = ?",
+        insert_message_row_in_connection(
+            &mut connection,
+            id,
+            conversation_id,
+            role,
+            content,
+            status,
         )
-        .bind(conversation_id)
-        .fetch_one(&mut *connection)
-        .await?;
-
-        sqlx::query(
-            "INSERT INTO messages
-                (id, conversation_id, role, content, status, ordinal)
-             VALUES (?, ?, ?, ?, ?, ?)",
-        )
-        .bind(id)
-        .bind(conversation_id)
-        .bind(role)
-        .bind(content)
-        .bind(status)
-        .bind(ordinal)
-        .execute(&mut *connection)
-        .await?;
-
-        sqlx::query(
-            "UPDATE conversations
-             SET updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-             WHERE id = ?",
-        )
-        .bind(conversation_id)
-        .execute(&mut *connection)
         .await?;
 
         Ok::<(), sqlx::Error>(())
@@ -190,6 +213,49 @@ async fn insert_message_row(
         let _ = sqlx::query("ROLLBACK").execute(&mut *connection).await;
         return Err(error);
     }
+
+    Ok(())
+}
+
+async fn insert_message_row_in_connection(
+    connection: &mut SqliteConnection,
+    id: &str,
+    conversation_id: &str,
+    role: &str,
+    content: &str,
+    status: &str,
+) -> Result<(), sqlx::Error> {
+    let ordinal = sqlx::query_scalar::<_, i64>(
+        "SELECT COALESCE(MAX(ordinal) + 1, 0)
+         FROM messages
+         WHERE conversation_id = ?",
+    )
+    .bind(conversation_id)
+    .fetch_one(&mut *connection)
+    .await?;
+
+    sqlx::query(
+        "INSERT INTO messages
+            (id, conversation_id, role, content, status, ordinal)
+         VALUES (?, ?, ?, ?, ?, ?)",
+    )
+    .bind(id)
+    .bind(conversation_id)
+    .bind(role)
+    .bind(content)
+    .bind(status)
+    .bind(ordinal)
+    .execute(&mut *connection)
+    .await?;
+
+    sqlx::query(
+        "UPDATE conversations
+         SET updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+         WHERE id = ?",
+    )
+    .bind(conversation_id)
+    .execute(&mut *connection)
+    .await?;
 
     Ok(())
 }
@@ -268,6 +334,16 @@ pub async fn mark_chat_request_succeeded(
     request_id: &str,
     assistant_message_id: &str,
 ) -> Result<(), sqlx::Error> {
+    let mut connection = pool.acquire().await?;
+    mark_chat_request_succeeded_in_connection(&mut connection, request_id, assistant_message_id)
+        .await
+}
+
+async fn mark_chat_request_succeeded_in_connection(
+    connection: &mut SqliteConnection,
+    request_id: &str,
+    assistant_message_id: &str,
+) -> Result<(), sqlx::Error> {
     let result = sqlx::query(
         "UPDATE chat_requests
          SET status = 'succeeded',
@@ -278,7 +354,7 @@ pub async fn mark_chat_request_succeeded(
     )
     .bind(assistant_message_id)
     .bind(request_id)
-    .execute(pool)
+    .execute(&mut *connection)
     .await?;
     if result.rows_affected() == 0 {
         return Err(sqlx::Error::RowNotFound);

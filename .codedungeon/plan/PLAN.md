@@ -1,30 +1,18 @@
-# CodeDungeon Plan: gpt-copy-v6
+# Repo: .
 
 PROJECT_RULES_STATUS: approved
 PROJECT_RULES_DIGEST: be792d27d9969ae5ed95a5caa5de79b0b97d20bbd97ec73bf92cd031941e9d31
 PROJECT_RULES_READ: yes
 
-Goal: implement `gpt-copy-v6`, a ChatGPT-style local monorepo with a Rust 2024 Axum backend, a Next.js App Router TypeScript/Tailwind frontend, SQLite persistence, server-only OpenRouter access, focused tests, adversarial review evidence, a GitHub PR, and CodeDungeon final gates.
-
-Ordered tasks:
-
-- [x] task-001-pr-workflow-preflight.md
-- [x] task-002-backend-foundation-health.md
-- [x] task-003-backend-sqlite-rest.md
-- [x] task-004-backend-openrouter-chat-streaming.md
-- [x] task-005-frontend-scaffold-api-boundary.md
-- [x] task-006-frontend-chat-experience.md
-- [x] task-007-frontend-playwright-smoke.md
-- [x] task-008-docs-env-gitignore.md
-- [x] task-009-integrated-verification.md
-- [ ] task-010-pr-review-final-gates.md
-
-Parallelization:
-
-- Backend tasks 002 through 004 are sequential.
-- Frontend task 005 can start after backend API shapes are defined and can overlap with backend provider work.
-- Frontend tasks 006 and 007 are sequential after task 005.
-- Docs/env task 008 waits for stable commands and file layout.
-- Verification and PR/review/final gates run last.
-
-PHASE_4_PLAN
+- [ ] TASK-001 wave 1: Set monorepo guardrails
+- [ ] TASK-002 wave 2: Build Axum backend foundation
+- [ ] TASK-008 wave 2: Create Next.js frontend foundation
+- [ ] TASK-003 wave 3: Add SQLite persistence layer
+- [ ] TASK-004 wave 4: Implement conversation endpoints
+- [ ] TASK-005 wave 5: Implement OpenRouter provider and send endpoint
+- [ ] TASK-006 wave 6: Implement streaming chat endpoint
+- [ ] TASK-007 wave 7: Complete backend verification coverage
+- [ ] TASK-009 wave 7: Implement frontend API and stream state
+- [ ] TASK-010 wave 8: Build ChatGPT-style frontend UI
+- [ ] TASK-011 wave 9: Add frontend component and Playwright tests
+- [ ] TASK-012 wave 10: Finalize docs and full verification

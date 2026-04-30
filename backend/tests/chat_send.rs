@@ -168,3 +168,52 @@ async fn chat_send_provider_failures_return_structured_errors_and_no_assistant_m
         assert_eq!(request.2.as_deref(), Some(expected_code));
     }
 }
+
+#[tokio::test]
+async fn chat_send_marks_request_failed_when_success_persistence_fails() {
+    let context = test_context_with_secret_config().await;
+    context.provider.with_completion(Ok("assistant answer"));
+    let conversation_id = common::create_conversation(context.app.clone()).await;
+    sqlx::query(
+        "CREATE TRIGGER fail_chat_request_success
+         BEFORE UPDATE OF status ON chat_requests
+         WHEN NEW.status = 'succeeded'
+         BEGIN
+            SELECT RAISE(ABORT, 'forced success persistence failure');
+         END;",
+    )
+    .execute(&context.pool)
+    .await
+    .unwrap();
+
+    let (status, body) = common::request_json(
+        context.app,
+        Method::POST,
+        &format!("/conversations/{conversation_id}/messages"),
+        Some(json!({ "content": "Hello provider" })),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR, "{body}");
+    assert_eq!(body["error"]["code"], "database_error");
+
+    let request: (String, Option<String>, Option<String>) = sqlx::query_as(
+        "SELECT status, assistant_message_id, error_code FROM chat_requests WHERE conversation_id = ?",
+    )
+    .bind(&conversation_id)
+    .fetch_one(&context.pool)
+    .await
+    .unwrap();
+    assert_eq!(request.0, "failed");
+    assert!(request.1.is_none());
+    assert_eq!(request.2.as_deref(), Some("database_error"));
+
+    let assistant_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM messages WHERE conversation_id = ? AND role = 'assistant'",
+    )
+    .bind(&conversation_id)
+    .fetch_one(&context.pool)
+    .await
+    .unwrap();
+    assert_eq!(assistant_count, 0);
+}

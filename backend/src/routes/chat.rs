@@ -49,14 +49,28 @@ pub async fn send_message(
             return Err(error);
         }
     };
-    let assistant_message = db::insert_message(
+    let assistant_message = match db::insert_assistant_message_and_mark_chat_request_succeeded(
         &state.pool,
         &conversation_id,
-        "assistant",
         &assistant_content,
+        &request_id,
     )
-    .await?;
-    db::mark_chat_request_succeeded(&state.pool, &request_id, &assistant_message.id).await?;
+    .await
+    {
+        Ok(message) => message,
+        Err(error) => {
+            let app_error = AppError::from(error);
+            if let Err(db_error) =
+                db::mark_chat_request_failed(&state.pool, &request_id, app_error.code()).await
+            {
+                tracing::error!(
+                    error = ?db_error,
+                    "failed to mark non-stream chat request failed after persistence error"
+                );
+            }
+            return Err(app_error);
+        }
+    };
 
     tracing::debug!(%conversation_id, %user_message_id, "chat message completed");
 
